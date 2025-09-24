@@ -218,7 +218,7 @@ Important:
         print(f"   📨 Sending test generation request to Claude...")
         
         response = self.claude_client.messages.create(
-            model="claude-3-5-sonnet-latest",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=2000,
             messages=[
                 {

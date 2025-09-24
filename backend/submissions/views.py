@@ -8,12 +8,15 @@ import os
 import time
 import uuid
 
-from .models import Assignment, StudentSubmission
+from .models import Assignment, StudentSubmission, Course, Student
 from .serializers import (
     AssignmentSerializer, 
     StudentSubmissionSerializer, 
     FileUploadSerializer,
-    GradingResultSerializer
+    GradingResultSerializer,
+    CourseSerializer,
+    StudentSerializer,
+    StudentBulkUploadSerializer
 )
 from grading.services import GradingService
 
@@ -46,22 +49,28 @@ def upload_submission(request):
     try:
         # Get validated data
         file = serializer.validated_data['file']
-        student_name = serializer.validated_data['student_name']
-        student_id = serializer.validated_data['student_id']
+        student_id = serializer.validated_data.get('student_id')
         assignment_id = serializer.validated_data['assignment_id']
         
         # Get assignment
         assignment = get_object_or_404(Assignment, id=assignment_id)
         
+        # Get student (prefer student_id, fall back to manual entry)
+        student = None
+        if student_id:
+            student = get_object_or_404(Student, id=student_id)
+        
         # Create submission record
         submission = StudentSubmission.objects.create(
-            student_name=student_name,
-            student_id=student_id,
+            student=student,
             assignment=assignment,
             code_file=file,
             file_name=file.name,
             file_size=file.size,
-            status='pending'
+            status='pending',
+            # Legacy fields for backward compatibility (store when no student is linked)
+            legacy_student_name=serializer.validated_data.get('manual_student_name', '') if not student else '',
+            legacy_student_id=serializer.validated_data.get('manual_student_email', '') if not student else ''  # Store email in legacy field
         )
         
         # Serialize response
@@ -72,9 +81,9 @@ def upload_submission(request):
             'submission': response_serializer.data
         }, status=status.HTTP_201_CREATED)
         
-    except Assignment.DoesNotExist:
+    except (Assignment.DoesNotExist, Student.DoesNotExist) as e:
         return Response(
-            {'error': 'Assignment not found'}, 
+            {'error': f'{e.__class__.__name__}: Object not found'}, 
             status=status.HTTP_404_NOT_FOUND
         )
     except Exception as e:
@@ -153,5 +162,84 @@ def submission_detail(request, submission_id):
     except StudentSubmission.DoesNotExist:
         return Response(
             {'error': 'Submission not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+# Course Management Views
+class CourseListCreateView(generics.ListCreateAPIView):
+    queryset = Course.objects.all()
+    serializer_class = CourseSerializer
+
+class CourseDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Course.objects.all()
+    serializer_class = CourseSerializer
+
+# Student Management Views
+class StudentListCreateView(generics.ListCreateAPIView):
+    queryset = Student.objects.all()
+    serializer_class = StudentSerializer
+    
+    def get_queryset(self):
+        queryset = Student.objects.all()
+        course_id = self.request.query_params.get('course_id', None)
+        if course_id:
+            queryset = queryset.filter(courses__id=course_id)
+        return queryset
+
+class StudentDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Student.objects.all()
+    serializer_class = StudentSerializer
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def bulk_upload_students(request):
+    """
+    Bulk upload students from CSV file
+    """
+    serializer = StudentBulkUploadSerializer(data=request.data)
+    
+    if not serializer.is_valid():
+        return Response(
+            {'error': 'Invalid data', 'details': serializer.errors}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        result = serializer.save()
+        return Response({
+            'message': f"Bulk upload completed for {result['course']}",
+            'students_processed': len(result['students_created']),
+            'students_created': result['students_created'],
+            'errors': result['errors']
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        print(f"Bulk upload error: {e}")
+        print(f"Full traceback: {error_traceback}")
+        return Response(
+            {'error': 'Bulk upload failed', 'details': str(e), 'traceback': error_traceback}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+def students_by_course(request, course_id):
+    """
+    Get all students enrolled in a specific course
+    """
+    try:
+        course = get_object_or_404(Course, id=course_id)
+        students = course.students.all()
+        serializer = StudentSerializer(students, many=True)
+        
+        return Response({
+            'course': CourseSerializer(course).data,
+            'students': serializer.data
+        })
+        
+    except Course.DoesNotExist:
+        return Response(
+            {'error': 'Course not found'}, 
             status=status.HTTP_404_NOT_FOUND
         )

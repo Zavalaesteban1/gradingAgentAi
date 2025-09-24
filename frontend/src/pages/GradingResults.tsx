@@ -205,7 +205,7 @@ interface GradingData {
   id: string;
   submission: {
     student_name: string;
-    student_id: string;
+    student_email: string;
     assignment_name: string;
     file_name: string;
     submitted_at: string;
@@ -335,8 +335,8 @@ const GradingResults: React.FC = () => {
             <span>{gradingData.submission.student_name}</span>
           </div>
           <div className="meta-item">
-            <span className="meta-label">Student ID:</span>
-            <span>{gradingData.submission.student_id}</span>
+            <span className="meta-label">Email:</span>
+            <span>{gradingData.submission.student_email}</span>
           </div>
           <div className="meta-item">
             <span className="meta-label">File:</span>

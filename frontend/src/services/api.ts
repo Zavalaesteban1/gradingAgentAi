@@ -90,6 +90,29 @@ export interface AnalyticsData {
   timeToGrade: number; // average in minutes
 }
 
+export interface Course {
+  id: string;
+  course_code: string;
+  section: string;
+  semester: string;
+  name: string;
+  instructor: string;
+  full_course_name: string;
+  student_count: number;
+  created_at: string;
+}
+
+export interface Student {
+  id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  courses: string[];
+  course_names: string[];
+  created_at: string;
+}
+
 // API Service Functions
 export const gradingApi = {
   // Submission Management
@@ -203,6 +226,63 @@ export const gradingApi = {
   // Analytics
   async getAnalytics(filters?: { dateRange?: [string, string]; assignmentId?: string }): Promise<AnalyticsData> {
     const response = await api.get('/analytics', { params: filters });
+    return response.data;
+  },
+
+  // Course Management
+  async getCourses(): Promise<Course[]> {
+    const response = await api.get('/submissions/courses/');
+    return response.data;
+  },
+
+  async createCourse(course: Omit<Course, 'id' | 'full_course_name' | 'student_count' | 'created_at'>): Promise<Course> {
+    const response = await api.post('/submissions/courses/', course);
+    return response.data;
+  },
+
+  async getCourse(courseId: string): Promise<Course> {
+    const response = await api.get(`/submissions/courses/${courseId}/`);
+    return response.data;
+  },
+
+  // Student Management
+  async getStudents(courseId?: string): Promise<Student[]> {
+    const params = courseId ? { course_id: courseId } : {};
+    const response = await api.get('/submissions/students/', { params });
+    return response.data;
+  },
+
+  async createStudent(student: Omit<Student, 'id' | 'full_name' | 'course_names' | 'created_at'>): Promise<Student> {
+    const response = await api.post('/submissions/students/', student);
+    return response.data;
+  },
+
+  async getStudentsByCourse(courseId: string): Promise<{ course: Course; students: Student[] }> {
+    const response = await api.get(`/submissions/courses/${courseId}/students/`);
+    return response.data;
+  },
+
+  async bulkUploadStudents(csvFile: File, courseId: string): Promise<any> {
+    const formData = new FormData();
+    formData.append('csv_file', csvFile);
+    formData.append('course_id', courseId);
+
+    const response = await api.post('/submissions/students/bulk-upload/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  // Updated uploadSubmission to work with new student system
+  async uploadSubmissionWithStudent(file: File, metadata: { studentId: string; assignmentId: string }): Promise<{ message: string; submission: StudentSubmission }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('student_id', metadata.studentId);
+    formData.append('assignment_id', metadata.assignmentId);
+    
+    const response = await api.post('/submissions/upload/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
     return response.data;
   },
 

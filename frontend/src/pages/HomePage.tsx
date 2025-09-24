@@ -145,6 +145,7 @@ const ScoreBadge = styled.span`
 interface SubmissionData {
   id: string;
   student: string;
+  studentEmail?: string;
   fileName: string;
   submittedAt: string;
   status: 'pending' | 'grading' | 'graded' | 'error';
@@ -221,6 +222,7 @@ const HomePage: React.FC = () => {
       const processedSubmissions: SubmissionData[] = submissions.map((sub: any) => ({
         id: sub.id,
         student: sub.student_name || 'Unknown Student',
+        studentEmail: sub.student_email || undefined,
         fileName: sub.file_name || 'Unknown File',
         submittedAt: formatTimeAgo(sub.submitted_at || ''),  // Use correct field name
         status: sub.status as 'pending' | 'grading' | 'graded' | 'error',
@@ -397,9 +399,14 @@ const HomePage: React.FC = () => {
                   <TableCell>
                     <div>
                       <div style={{ fontWeight: '500' }}>{submission.student}</div>
-                      {submission.assignmentName && (
+                      {submission.studentEmail && (
                         <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                          {submission.assignmentName}
+                          {submission.studentEmail}
+                        </div>
+                      )}
+                      {submission.assignmentName && (
+                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                          📝 {submission.assignmentName}
                         </div>
                       )}
                     </div>

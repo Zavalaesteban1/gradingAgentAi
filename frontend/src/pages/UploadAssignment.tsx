@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import styled from 'styled-components';
-import { gradingApi } from '../services/api';
+import { gradingApi, Course, Student } from '../services/api';
 
 const UploadContainer = styled.div`
   padding: 2rem 0;
@@ -221,19 +221,28 @@ const SubmitButton = styled.button<{ $loading?: boolean }>`
   }
 `;
 
-const Alert = styled.div<{ type: 'success' | 'error' }>`
+const Alert = styled.div<{ type: 'success' | 'error' | 'warning' }>`
   padding: 1rem;
   border-radius: 6px;
   margin-bottom: 1rem;
-  background: ${({ type }) => type === 'success' ? '#dcfce7' : '#fecaca'};
-  color: ${({ type }) => type === 'success' ? '#166534' : '#991b1b'};
-  border: 1px solid ${({ type }) => type === 'success' ? '#bbf7d0' : '#fca5a5'};
+  background: ${({ type }) => 
+    type === 'success' ? '#dcfce7' : 
+    type === 'warning' ? '#fef3c7' : '#fecaca'};
+  color: ${({ type }) => 
+    type === 'success' ? '#166534' : 
+    type === 'warning' ? '#92400e' : '#991b1b'};
+  border: 1px solid ${({ type }) => 
+    type === 'success' ? '#bbf7d0' : 
+    type === 'warning' ? '#fbbf24' : '#fca5a5'};
 `;
 
 interface FormData {
-  studentName: string;
+  courseId: string;
   studentId: string;
   assignmentId: string;
+  // Fallback for manual entry
+  manualStudentName?: string;
+  manualStudentEmail?: string;
 }
 
 interface Assignment {
@@ -244,9 +253,11 @@ interface Assignment {
 }
 
 interface FormErrors {
-  studentName?: string;
+  courseId?: string;
   studentId?: string;
   assignmentId?: string;
+  manualStudentName?: string;
+  manualStudentEmail?: string;
   file?: string;
 }
 
@@ -255,23 +266,35 @@ const UploadAssignment: React.FC = () => {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [useManualEntry, setUseManualEntry] = useState(false);
   const [formData, setFormData] = useState<FormData>({
-    studentName: '',
+    courseId: '',
     studentId: '',
-    assignmentId: ''
+    assignmentId: '',
+    manualStudentName: '',
+    manualStudentEmail: ''
   });
   const [errors, setErrors] = useState<FormErrors>({});
-  const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
 
-  // Load assignments on component mount
+  // Load data on component mount
   useEffect(() => {
-    const loadAssignments = async () => {
+    const loadData = async () => {
       try {
-        const assignmentList = await gradingApi.getAssignments();
+        // Load assignments and courses in parallel
+        const [assignmentList, courseList] = await Promise.all([
+          gradingApi.getAssignments(),
+          gradingApi.getCourses()
+        ]);
         
-        // Ensure we always have an array
+        // Ensure we always have arrays
         const assignments = Array.isArray(assignmentList) ? assignmentList : [];
+        const courses = Array.isArray(courseList) ? courseList : [];
+        
         setAssignments(assignments);
+        setCourses(courses);
         
         // Auto-select first assignment if available
         if (assignments.length > 0) {
@@ -282,28 +305,84 @@ const UploadAssignment: React.FC = () => {
             message: 'No assignments found. Please create an assignment first using "Upload Answer Keys".'
           });
         }
+
+        // Auto-select first course if available
+        if (courses.length > 0) {
+          setFormData(prev => ({ ...prev, courseId: courses[0].id }));
+        } else {
+          // No courses found, default to manual entry
+          setUseManualEntry(true);
+          setAlert({
+            type: 'warning',
+            message: 'No courses found. You can still upload assignments using manual student entry, or go to "Manage Students" to set up your courses.'
+          });
+        }
+
       } catch (error) {
-        console.error('Failed to load assignments:', error);
-        setAssignments([]); // Ensure assignments is always an array
+        console.error('Failed to load data:', error);
+        setAssignments([]);
+        setCourses([]);
+        setUseManualEntry(true);
         setAlert({
           type: 'error',
-          message: 'Failed to load assignments. Make sure the backend is running and try refreshing the page.'
+          message: 'Failed to load data. Make sure the backend is running. Using manual entry mode.'
         });
       }
     };
 
-    loadAssignments();
+    loadData();
   }, []);
+
+  // Load students when course changes
+  useEffect(() => {
+    const loadStudents = async () => {
+      if (formData.courseId && !useManualEntry) {
+        try {
+          const response = await gradingApi.getStudentsByCourse(formData.courseId);
+          setStudents(response.students || []);
+          
+          // Auto-select first student if available
+          if (response.students && response.students.length > 0) {
+            setFormData(prev => ({ ...prev, studentId: response.students[0].id }));
+          } else {
+            setAlert({
+              type: 'warning',
+              message: 'No students found for this course. Go to "Manage Students" to upload student lists, or use manual entry below.'
+            });
+          }
+        } catch (error) {
+          console.error('Failed to load students:', error);
+          setStudents([]);
+        }
+      }
+    };
+
+    loadStudents();
+  }, [formData.courseId, useManualEntry]);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
     
-    if (!formData.studentName.trim()) {
-      newErrors.studentName = 'Student name is required';
-    }
-    
-    if (!formData.studentId.trim()) {
-      newErrors.studentId = 'Student ID is required';
+    if (useManualEntry) {
+      // Manual entry validation
+      if (!formData.manualStudentName?.trim()) {
+        newErrors.manualStudentName = 'Student name is required';
+      }
+      
+      if (!formData.manualStudentEmail?.trim()) {
+        newErrors.manualStudentEmail = 'Student email is required';
+      } else if (!formData.manualStudentEmail.includes('@')) {
+        newErrors.manualStudentEmail = 'Please enter a valid email address';
+      }
+    } else {
+      // Dropdown validation
+      if (!formData.courseId) {
+        newErrors.courseId = 'Please select a course';
+      }
+      
+      if (!formData.studentId) {
+        newErrors.studentId = 'Please select a student';
+      }
     }
     
     if (!formData.assignmentId) {
@@ -376,11 +455,33 @@ const UploadAssignment: React.FC = () => {
     setAlert(null);
     
     try {
-      const response = await gradingApi.uploadSubmission(selectedFile, {
-        studentName: formData.studentName,
-        studentId: formData.studentId,
-        assignmentId: formData.assignmentId
-      });
+      let response;
+      
+      if (useManualEntry) {
+        // Use legacy API for manual entry with email
+        const formData_api = new FormData();
+        formData_api.append('file', selectedFile);
+        formData_api.append('manual_student_name', formData.manualStudentName!);
+        formData_api.append('manual_student_email', formData.manualStudentEmail!);
+        formData_api.append('assignment_id', formData.assignmentId);
+        
+        const api_response = await fetch('http://localhost:8000/api/submissions/upload/', {
+          method: 'POST',
+          body: formData_api
+        });
+        
+        if (!api_response.ok) {
+          throw new Error(`Upload failed: ${api_response.status}`);
+        }
+        
+        response = await api_response.json();
+      } else {
+        // Use new student-based API
+        response = await gradingApi.uploadSubmissionWithStudent(selectedFile, {
+          studentId: formData.studentId,
+          assignmentId: formData.assignmentId
+        });
+      }
       
       const submissionId = response.submission.id;
       
@@ -433,9 +534,11 @@ const UploadAssignment: React.FC = () => {
       // Reset form
       setSelectedFile(null);
       setFormData({
-        studentName: '',
-        studentId: '',
-        assignmentId: (assignments && assignments.length > 0) ? assignments[0].id : ''
+        courseId: (courses && courses.length > 0) ? courses[0].id : '',
+        studentId: (students && students.length > 0) ? students[0].id : '',
+        assignmentId: (assignments && assignments.length > 0) ? assignments[0].id : '',
+        manualStudentName: '',
+        manualStudentEmail: ''
       });
       setErrors({});
       
@@ -489,36 +592,121 @@ const UploadAssignment: React.FC = () => {
       <form onSubmit={handleSubmit}>
         <UploadCard>
           <StudentInfoForm>
-            <h3>Student Information</h3>
-            <FormRow>
-              <FormGroup>
-                <Label htmlFor="studentName">Student Name *</Label>
-                <Input
-                  id="studentName"
-                  name="studentName"
-                  type="text"
-                  value={formData.studentName}
-                  onChange={handleInputChange}
-                  placeholder="Enter student's full name"
-                  hasError={!!errors.studentName}
-                />
-                {errors.studentName && <ErrorText>{errors.studentName}</ErrorText>}
-              </FormGroup>
-              
-              <FormGroup>
-                <Label htmlFor="studentId">Student ID *</Label>
-                <Input
-                  id="studentId"
-                  name="studentId"
-                  type="text"
-                  value={formData.studentId}
-                  onChange={handleInputChange}
-                  placeholder="Enter student ID"
-                  hasError={!!errors.studentId}
-                />
-                {errors.studentId && <ErrorText>{errors.studentId}</ErrorText>}
-              </FormGroup>
-            </FormRow>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3>Student Information</h3>
+              <button
+                type="button"
+                onClick={() => setUseManualEntry(!useManualEntry)}
+                style={{
+                  background: 'none',
+                  border: '1px solid #667eea',
+                  color: '#667eea',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '6px',
+                  fontSize: '0.875rem',
+                  cursor: 'pointer'
+                }}
+              >
+                {useManualEntry ? '📚 Use Course Lists' : '✏️ Manual Entry'}
+              </button>
+            </div>
+
+            {!useManualEntry ? (
+              // Course and Student Dropdowns
+              <>
+                <FormRow>
+                  <FormGroup>
+                    <Label htmlFor="courseId">Course *</Label>
+                    <Select
+                      id="courseId"
+                      name="courseId"
+                      value={formData.courseId}
+                      onChange={handleInputChange}
+                      hasError={!!errors.courseId}
+                    >
+                      <option value="">Select a course</option>
+                      {courses.map((course) => (
+                        <option key={course.id} value={course.id}>
+                          {course.full_course_name} - {course.name}
+                        </option>
+                      ))}
+                    </Select>
+                    {errors.courseId && <ErrorText>{errors.courseId}</ErrorText>}
+                  </FormGroup>
+                  
+                  <FormGroup>
+                    <Label htmlFor="studentId">Student *</Label>
+                    <Select
+                      id="studentId"
+                      name="studentId"
+                      value={formData.studentId}
+                      onChange={handleInputChange}
+                      hasError={!!errors.studentId}
+                      disabled={!formData.courseId}
+                    >
+                      <option value="">
+                        {!formData.courseId ? 'Select a course first' : 'Select a student'}
+                      </option>
+                      {students.map((student) => (
+                        <option key={student.id} value={student.id}>
+                          {student.full_name} ({student.email})
+                        </option>
+                      ))}
+                    </Select>
+                    {errors.studentId && <ErrorText>{errors.studentId}</ErrorText>}
+                  </FormGroup>
+                </FormRow>
+                
+                {students.length === 0 && formData.courseId && (
+                  <div style={{ 
+                    background: '#fef3c7', 
+                    color: '#92400e', 
+                    padding: '0.75rem', 
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    marginBottom: '1rem'
+                  }}>
+                    📋 No students found for this course. <a 
+                      href="/students" 
+                      style={{ color: '#92400e', fontWeight: 'bold' }}
+                    >
+                      Go to "Manage Students"
+                    </a> to upload student lists.
+                  </div>
+                )}
+              </>
+            ) : (
+              // Manual Entry Fields
+              <FormRow>
+                <FormGroup>
+                  <Label htmlFor="manualStudentName">Student Name *</Label>
+                  <Input
+                    id="manualStudentName"
+                    name="manualStudentName"
+                    type="text"
+                    value={formData.manualStudentName || ''}
+                    onChange={handleInputChange}
+                    placeholder="Enter student's full name"
+                    hasError={!!errors.manualStudentName}
+                  />
+                  {errors.manualStudentName && <ErrorText>{errors.manualStudentName}</ErrorText>}
+                </FormGroup>
+                
+                <FormGroup>
+                  <Label htmlFor="manualStudentEmail">Email *</Label>
+                  <Input
+                    id="manualStudentEmail"
+                    name="manualStudentEmail"
+                    type="email"
+                    value={formData.manualStudentEmail || ''}
+                    onChange={handleInputChange}
+                    placeholder="Enter student email"
+                    hasError={!!errors.manualStudentEmail}
+                  />
+                  {errors.manualStudentEmail && <ErrorText>{errors.manualStudentEmail}</ErrorText>}
+                </FormGroup>
+              </FormRow>
+            )}
             
             <FormGroup>
               <Label htmlFor="assignmentId">Assignment *</Label>

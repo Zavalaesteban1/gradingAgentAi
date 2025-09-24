@@ -13,7 +13,7 @@ from .tools import CPPAnalysisTools
 class GradingService:
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=settings.CLAUDE_API_KEY)
-        self.model = "claude-3-5-sonnet-latest"  # Use latest stable model
+        self.model = "claude-3-5-sonnet-20241022"  # Use latest stable model
     
     def grade_submission(self, submission: StudentSubmission) -> GradingResult:
         """
@@ -23,7 +23,8 @@ class GradingService:
         tools = None
         
         try:
-            print(f"\n🤖 AI AGENT GRADING STARTED for {submission.student_name}")
+            student_name = submission.student.full_name if submission.student else submission.legacy_student_name
+            print(f"\n🤖 AI AGENT GRADING STARTED for {student_name}")
             print(f"   📝 Assignment: {submission.assignment.name}")
             print("=" * 70)
             
@@ -127,7 +128,7 @@ class GradingService:
             )
             
             print(f"\n🎯 FINAL GRADING SUMMARY:")
-            print(f"   👤 Student: {submission.student_name}")
+            print(f"   👤 Student: {student_name}")
             print(f"   📝 Assignment: {submission.assignment.name}")
             print(f"   🏆 Final Score: {grading_data['total_score']}/{grading_data['max_score']} ({grading_data['percentage']}%)")
             print(f"   🔨 Compilation: {'✅ Success' if compilation_result['success'] else '❌ Failed'}")
