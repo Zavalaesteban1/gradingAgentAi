@@ -129,12 +129,14 @@ export const gradingApi = {
     return response.data;
   },
 
-  async batchUploadSubmissions(files: File[], assignmentId: string): Promise<StudentSubmission[]> {
+  async batchUploadSubmissions(files: FileList, assignmentId: string): Promise<any> {
     const formData = new FormData();
-    files.forEach(file => formData.append('files', file));
-    formData.append('assignmentId', assignmentId);
+    Array.from(files).forEach(file => {
+      formData.append('files', file);
+    });
+    formData.append('assignment_id', assignmentId);
     
-    const response = await api.post('/submissions/batch-upload', formData, {
+    const response = await api.post('/submissions/batch-upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
@@ -232,7 +234,17 @@ export const gradingApi = {
   // Course Management
   async getCourses(): Promise<Course[]> {
     const response = await api.get('/submissions/courses/');
-    return response.data;
+    console.log('Courses API Response:', response.data); // Debug log
+    
+    // Handle paginated response
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else if (response.data && Array.isArray(response.data.results)) {
+      return response.data.results;
+    } else {
+      console.warn('Unexpected courses API response format:', response.data);
+      return [];
+    }
   },
 
   async createCourse(course: Omit<Course, 'id' | 'full_course_name' | 'student_count' | 'created_at'>): Promise<Course> {
@@ -249,7 +261,17 @@ export const gradingApi = {
   async getStudents(courseId?: string): Promise<Student[]> {
     const params = courseId ? { course_id: courseId } : {};
     const response = await api.get('/submissions/students/', { params });
-    return response.data;
+    console.log('Students API Response:', response.data); // Debug log
+    
+    // Handle paginated response
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else if (response.data && Array.isArray(response.data.results)) {
+      return response.data.results;
+    } else {
+      console.warn('Unexpected students API response format:', response.data);
+      return [];
+    }
   },
 
   async createStudent(student: Omit<Student, 'id' | 'full_name' | 'course_names' | 'created_at'>): Promise<Student> {
@@ -259,7 +281,18 @@ export const gradingApi = {
 
   async getStudentsByCourse(courseId: string): Promise<{ course: Course; students: Student[] }> {
     const response = await api.get(`/submissions/courses/${courseId}/students/`);
-    return response.data;
+    console.log('Course Students API Response:', response.data); // Debug log
+    
+    // Handle the response - this endpoint returns {course: {...}, students: [...]}
+    if (response.data && response.data.course) {
+      return {
+        course: response.data.course,
+        students: Array.isArray(response.data.students) ? response.data.students : []
+      };
+    } else {
+      console.warn('Unexpected course students API response format:', response.data);
+      throw new Error('Invalid response format from course students API');
+    }
   },
 
   async bulkUploadStudents(csvFile: File, courseId: string): Promise<any> {
@@ -283,6 +316,22 @@ export const gradingApi = {
     const response = await api.post('/submissions/upload/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
+    return response.data;
+  },
+
+  // Batch Grading Functions
+  async getAllBatchJobs(): Promise<any> {
+    const response = await api.get('/submissions/batch/');
+    return response.data;
+  },
+
+  async getBatchStatus(batchJobId: string): Promise<any> {
+    const response = await api.get(`/submissions/batch/${batchJobId}/status/`);
+    return response.data;
+  },
+
+  async getBatchResults(batchJobId: string): Promise<any> {
+    const response = await api.get(`/submissions/batch/${batchJobId}/results/`);
     return response.data;
   },
 

@@ -23,12 +23,36 @@ class CPPAnalysisTools:
         Tool: Compile C++ code and return compilation results
         """
         try:
+            # Validate input code
+            if not code or not code.strip():
+                return {
+                    "success": False,
+                    "errors": "Empty or invalid code provided",
+                    "compiler_output": "No code to compile"
+                }
+            
+            # Clean and validate the code
+            cleaned_code = self._clean_cpp_code(code)
+            
             # Write code to temporary file
             cpp_file = os.path.join(self.temp_dir, filename)
             executable = os.path.join(self.temp_dir, "program")
             
-            with open(cpp_file, 'w', encoding='utf-8') as f:
-                f.write(code)
+            # Ensure temp directory exists
+            os.makedirs(self.temp_dir, exist_ok=True)
+            
+            with open(cpp_file, 'w', encoding='utf-8', errors='replace') as f:
+                f.write(cleaned_code)
+            
+            # Check if g++ is available
+            try:
+                subprocess.run(['g++', '--version'], capture_output=True, check=True, timeout=5)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return {
+                    "success": False,
+                    "errors": "C++ compiler (g++) not available on this system",
+                    "compiler_output": "Missing compiler"
+                }
             
             # Compile with g++
             compile_cmd = [
@@ -36,6 +60,7 @@ class CPPAnalysisTools:
                 '-std=c++17',  # Use modern C++ standard
                 '-Wall',       # Enable warnings
                 '-Wextra',     # Extra warnings
+                '-pedantic',   # Strict standard compliance
                 '-o', executable,
                 cpp_file
             ]
@@ -44,29 +69,76 @@ class CPPAnalysisTools:
                 compile_cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                cwd=self.temp_dir  # Set working directory
             )
             
+            # Check if executable was created
+            executable_exists = os.path.exists(executable)
+            
             return {
-                "success": result.returncode == 0,
-                "executable_path": executable if result.returncode == 0 else None,
+                "success": result.returncode == 0 and executable_exists,
+                "executable_path": executable if executable_exists else None,
                 "warnings": result.stderr if result.returncode == 0 and result.stderr else "",
                 "errors": result.stderr if result.returncode != 0 else "",
-                "compiler_output": result.stderr
+                "compiler_output": result.stderr,
+                "compiled_successfully": executable_exists
             }
             
         except subprocess.TimeoutExpired:
             return {
                 "success": False,
-                "errors": "Compilation timed out (>30 seconds)",
-                "compiler_output": "Timeout"
+                "errors": "Compilation timed out (>30 seconds) - code may have infinite loops or be too complex",
+                "compiler_output": "Compilation Timeout"
+            }
+        except OSError as e:
+            return {
+                "success": False,
+                "errors": f"System error during compilation: {str(e)}",
+                "compiler_output": str(e)
             }
         except Exception as e:
             return {
                 "success": False,
-                "errors": f"Compilation error: {str(e)}",
+                "errors": f"Unexpected compilation error: {str(e)}",
                 "compiler_output": str(e)
             }
+    
+    def _clean_cpp_code(self, code: str) -> str:
+        """Clean and validate C++ code before compilation"""
+        try:
+            # Remove BOM if present
+            if code.startswith('\ufeff'):
+                code = code[1:]
+            
+            # Normalize line endings
+            code = code.replace('\r\n', '\n').replace('\r', '\n')
+            
+            # Remove or replace problematic characters
+            cleaned = ''
+            for char in code:
+                if ord(char) < 32:  # Control characters
+                    if char in ['\n', '\t']:  # Keep newlines and tabs
+                        cleaned += char
+                    else:
+                        cleaned += ' '  # Replace other control chars with space
+                elif ord(char) > 126:  # Non-ASCII characters
+                    if ord(char) < 256:  # Extended ASCII
+                        cleaned += char
+                    else:
+                        cleaned += ' '  # Replace with space
+                else:
+                    cleaned += char
+            
+            # Ensure code ends with newline
+            if not cleaned.endswith('\n'):
+                cleaned += '\n'
+                
+            return cleaned
+            
+        except Exception:
+            # If cleaning fails, return original code
+            return code
     
     def run_with_input(self, executable_path: str, test_input: str, timeout: int = 10) -> Dict[str, Any]:
         """
@@ -109,6 +181,120 @@ class CPPAnalysisTools:
                 "output": ""
             }
     
+    def extract_rubric_from_code(self, reference_code: str) -> Dict[str, Any]:
+        """
+        Tool: Extract grading rubric from reference code comments
+        """
+        rubric_data = {
+            "has_custom_rubric": False,
+            "assignment_name": "Unknown Assignment",
+            "total_possible_points": 100,  # Default
+            "criteria": [],
+            "deduction_rules": []
+        }
+        
+        lines = reference_code.split('\n')
+        in_rubric_section = False
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Look for assignment name in comments
+            if "Name:" in line and "//" in line:
+                # Extract assignment name from header comments
+                continue
+            elif "Program Name:" in line and "//" in line:
+                name_match = re.search(r'Program Name:\s*(.+)', line)
+                if name_match:
+                    rubric_data["assignment_name"] = name_match.group(1).strip()
+            
+            # Look for rubric section
+            if "Rubric" in line and "//" in line:
+                in_rubric_section = True
+                rubric_data["has_custom_rubric"] = True
+                continue
+            
+            # Process rubric lines
+            if in_rubric_section and line.startswith("//"):
+                # Remove comment markers and extra spaces
+                rubric_line = line.replace("//", "").strip()
+                
+                # Skip empty lines
+                if not rubric_line:
+                    continue
+                
+                # Parse point deductions (e.g., "-5:", "-10:", "-20:", "-50:")
+                deduction_match = re.match(r'^-(\d+):\s*(.+)', rubric_line)
+                if deduction_match:
+                    points = int(deduction_match.group(1))
+                    category = deduction_match.group(2).strip()
+                    
+                    rubric_data["deduction_rules"].append({
+                        "points_deducted": points,
+                        "category": category,
+                        "description": category
+                    })
+                    continue
+                
+                # Parse individual criteria under a deduction category
+                if rubric_line and not rubric_line.startswith('-') and len(rubric_data["deduction_rules"]) > 0:
+                    # This is a sub-criterion for the last deduction rule
+                    last_rule = rubric_data["deduction_rules"][-1]
+                    if "subcriteria" not in last_rule:
+                        last_rule["subcriteria"] = []
+                    last_rule["subcriteria"].append(rubric_line)
+            else:
+                # End of rubric section if we encounter non-comment line
+                if in_rubric_section and not line.startswith("//"):
+                    in_rubric_section = False
+        
+        # Calculate total possible points based on maximum deduction
+        if rubric_data["deduction_rules"]:
+            max_deduction = max(rule["points_deducted"] for rule in rubric_data["deduction_rules"])
+            if max_deduction >= 50:
+                rubric_data["total_possible_points"] = 100
+            elif max_deduction >= 20:
+                rubric_data["total_possible_points"] = max_deduction * 2
+            else:
+                rubric_data["total_possible_points"] = 100
+        
+        # Convert deduction rules to positive criteria
+        for rule in rubric_data["deduction_rules"]:
+            criteria_name = rule["category"]
+            max_points = rule["points_deducted"]
+            
+            # Create positive criteria based on deduction rules
+            if "compile" in criteria_name.lower():
+                criteria_name = "Code Compilation"
+                description = "Code must compile without errors"
+            elif "algorithm" in criteria_name.lower() or "implement" in criteria_name.lower():
+                criteria_name = "Algorithm Implementation"
+                description = "Code must correctly implement the required algorithm"
+            elif "variable" in criteria_name.lower() or "format" in criteria_name.lower():
+                criteria_name = "Code Correctness"
+                description = "Proper variable usage, types, and input/output format"
+            elif "comment" in criteria_name.lower():
+                criteria_name = "Documentation"
+                description = "Adequate comments and program header"
+            else:
+                criteria_name = rule["category"]
+                description = rule["description"]
+            
+            rubric_data["criteria"].append({
+                "name": criteria_name,
+                "max_points": max_points,
+                "description": description,
+                "subcriteria": rule.get("subcriteria", [])
+            })
+        
+        print(f"   📋 Extracted Rubric: {len(rubric_data['criteria'])} criteria found")
+        if rubric_data["has_custom_rubric"]:
+            print(f"   📌 Assignment: {rubric_data['assignment_name']}")
+            for criteria in rubric_data["criteria"]:
+                print(f"   ✓ {criteria['name']}: {criteria['max_points']} points")
+        
+        return rubric_data
+
     def analyze_style(self, code: str) -> Dict[str, Any]:
         """
         Tool: Analyze C++ code style and best practices

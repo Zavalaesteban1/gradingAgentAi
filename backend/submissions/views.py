@@ -19,6 +19,7 @@ from .serializers import (
     StudentBulkUploadSerializer
 )
 from grading.services import GradingService
+from grading.batch_service import BatchGradingService
 
 class AssignmentListCreateView(generics.ListCreateAPIView):
     queryset = Assignment.objects.all()
@@ -242,4 +243,158 @@ def students_by_course(request, course_id):
         return Response(
             {'error': 'Course not found'}, 
             status=status.HTTP_404_NOT_FOUND
+        )
+
+# Batch Grading Views
+@api_view(['GET'])
+def batch_list(request):
+    """
+    Get list of all batch grading jobs
+    """
+    try:
+        from grading.models import BatchGradingJob
+        
+        # Get all batch jobs ordered by creation date (newest first)
+        batch_jobs = BatchGradingJob.objects.all().order_by('-created_at')
+        
+        results = []
+        for batch_job in batch_jobs:
+            # Calculate statistics
+            submissions = batch_job.submissions.all()
+            total_files = submissions.count()
+            graded_submissions = submissions.filter(grading_results__isnull=False)
+            successful_grades = graded_submissions.count()
+            failed_grades = total_files - successful_grades
+            
+            # Calculate average score
+            average_score = None
+            if successful_grades > 0:
+                from django.db.models import Avg
+                avg_result = graded_submissions.aggregate(
+                    avg_score=Avg('grading_results__percentage')
+                )
+                average_score = avg_result['avg_score']
+            
+            results.append({
+                'id': str(batch_job.id),
+                'assignment_name': batch_job.assignment_name,
+                'status': batch_job.status,
+                'total_files': total_files,
+                'processed_files': successful_grades + failed_grades,
+                'successful_grades': successful_grades,
+                'failed_grades': failed_grades,
+                'average_score': average_score,
+                'created_at': batch_job.created_at,
+                'completed_at': batch_job.completed_at
+            })
+        
+        return Response({'results': results})
+        
+    except Exception as e:
+        return Response(
+            {'error': 'Failed to get batch list', 'details': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser])
+def batch_upload_submissions(request):
+    """
+    Upload multiple student submissions for batch grading
+    """
+    try:
+        assignment_id = request.data.get('assignment_id')
+        files = request.FILES.getlist('files')
+        
+        if not assignment_id:
+            return Response(
+                {'error': 'Assignment ID is required'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not files:
+            return Response(
+                {'error': 'No files provided'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate file types
+        valid_files = []
+        invalid_files = []
+        
+        for file in files:
+            if file.name.lower().endswith('.cpp'):
+                valid_files.append(file)
+            else:
+                invalid_files.append(file.name)
+        
+        if not valid_files:
+            return Response(
+                {'error': 'No valid C++ files found'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create batch job
+        batch_service = BatchGradingService()
+        batch_job = batch_service.create_batch_job(assignment_id, valid_files)
+        
+        # Start processing in background
+        batch_service.start_batch_grading(str(batch_job.id))
+        
+        return Response({
+            'message': f'Batch job created with {len(valid_files)} files',
+            'batch_job_id': str(batch_job.id),
+            'valid_files': len(valid_files),
+            'invalid_files': invalid_files if invalid_files else None
+        }, status=status.HTTP_201_CREATED)
+        
+    except Assignment.DoesNotExist:
+        return Response(
+            {'error': 'Assignment not found'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except Exception as e:
+        return Response(
+            {'error': 'Batch upload failed', 'details': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+def batch_status(request, batch_job_id):
+    """
+    Get status of a batch grading job
+    """
+    try:
+        batch_service = BatchGradingService()
+        status_data = batch_service.get_batch_status(batch_job_id)
+        
+        if 'error' in status_data:
+            return Response(status_data, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response(status_data)
+        
+    except Exception as e:
+        return Response(
+            {'error': 'Failed to get batch status', 'details': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+def batch_results(request, batch_job_id):
+    """
+    Get detailed results for a batch grading job
+    """
+    try:
+        batch_service = BatchGradingService()
+        results_data = batch_service.get_batch_results(batch_job_id)
+        
+        if 'error' in results_data:
+            return Response(results_data, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response(results_data)
+        
+    except Exception as e:
+        return Response(
+            {'error': 'Failed to get batch results', 'details': str(e)}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

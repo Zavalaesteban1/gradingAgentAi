@@ -22,4 +22,10 @@ urlpatterns = [
     path('students/', views.StudentListCreateView.as_view(), name='student-list-create'),
     path('students/<uuid:pk>/', views.StudentDetailView.as_view(), name='student-detail'),
     path('students/bulk-upload/', views.bulk_upload_students, name='student-bulk-upload'),
+    
+    # Batch Grading URLs
+    path('batch/', views.batch_list, name='batch-list'),
+    path('batch-upload/', views.batch_upload_submissions, name='batch-upload'),
+    path('batch/<uuid:batch_job_id>/status/', views.batch_status, name='batch-status'),
+    path('batch/<uuid:batch_job_id>/results/', views.batch_results, name='batch-results'),
 ]

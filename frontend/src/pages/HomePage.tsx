@@ -63,9 +63,38 @@ const RecentSubmissions = styled.div`
   overflow: hidden;
 `;
 
+const TableContainer = styled.div`
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto;
+  
+  /* Custom scrollbar styling */
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #f1f5f9;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+    
+    &:hover {
+      background: #94a3b8;
+    }
+  }
+`;
+
 const SectionHeader = styled.div`
   padding: 1.5rem 2rem;
   border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
   
   h2 {
     font-size: 1.5rem;
@@ -75,9 +104,33 @@ const SectionHeader = styled.div`
   }
 `;
 
+const SearchInput = styled.input`
+  padding: 0.5rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  min-width: 250px;
+  
+  &:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+  }
+  
+  &::placeholder {
+    color: #9ca3af;
+  }
+`;
+
 const Table = styled.table`
   width: 100%;
   border-collapse: collapse;
+  
+  thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
 `;
 
 const TableHeader = styled.th`
@@ -160,6 +213,8 @@ interface Stats {
 
 const HomePage: React.FC = () => {
   const [submissions, setSubmissions] = useState<SubmissionData[]>([]);
+  const [filteredSubmissions, setFilteredSubmissions] = useState<SubmissionData[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [stats, setStats] = useState<Stats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,6 +236,20 @@ const HomePage: React.FC = () => {
       return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
     }
   };
+
+  // Filter submissions based on search term
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredSubmissions(submissions);
+    } else {
+      const filtered = submissions.filter(submission =>
+        submission.student.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        submission.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (submission.assignmentName && submission.assignmentName.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+      setFilteredSubmissions(filtered);
+    }
+  }, [searchTerm, submissions]);
 
   // Fetch submissions and calculate stats
   const fetchData = async () => {
@@ -209,6 +278,7 @@ const HomePage: React.FC = () => {
       // Handle empty submissions array
       if (submissions.length === 0) {
         setSubmissions([]);
+        setFilteredSubmissions([]);
         setStats([
           { value: '0', label: 'Total Submissions' },
           { value: '0', label: 'Graded' },
@@ -241,8 +311,9 @@ const HomePage: React.FC = () => {
         return new Date(dateB).getTime() - new Date(dateA).getTime();
       });
 
-      // Take only the most recent 10 submissions
-      setSubmissions(processedSubmissions.slice(0, 10));
+      // Show all submissions (removed 10 limit)
+      setSubmissions(processedSubmissions);
+      setFilteredSubmissions(processedSubmissions);
 
       // Calculate stats
       const totalSubmissions = submissions.length;
@@ -270,6 +341,7 @@ const HomePage: React.FC = () => {
       
       // Set fallback empty state
       setSubmissions([]);
+      setFilteredSubmissions([]);
       setStats([
         { value: '0', label: 'Total Submissions' },
         { value: '0', label: 'Graded' },
@@ -374,9 +446,16 @@ const HomePage: React.FC = () => {
 
       <RecentSubmissions>
         <SectionHeader>
-          <h2>Recent Submissions</h2>
+          <h2>All Submissions ({filteredSubmissions.length}{searchTerm ? ` of ${submissions.length}` : ''})</h2>
+          <SearchInput
+            type="text"
+            placeholder="🔍 Search students, files, or assignments..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </SectionHeader>
-        <Table>
+        <TableContainer>
+          <Table>
           <thead>
             <tr>
               <TableHeader>Student</TableHeader>
@@ -387,14 +466,35 @@ const HomePage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {submissions.length === 0 ? (
+            {filteredSubmissions.length === 0 ? (
               <tr>
                 <TableCell colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
-                  No submissions found. Upload some student assignments to see them here!
+                  {searchTerm ? (
+                    <>
+                      No submissions found for "{searchTerm}". Try a different search term.
+                      <br />
+                      <button 
+                        onClick={() => setSearchTerm('')}
+                        style={{
+                          background: 'transparent',
+                          color: '#667eea',
+                          border: 'none',
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          fontSize: '0.875rem',
+                          marginTop: '0.5rem'
+                        }}
+                      >
+                        Clear search
+                      </button>
+                    </>
+                  ) : (
+                    'No submissions found. Upload some student assignments to see them here!'
+                  )}
                 </TableCell>
               </tr>
             ) : (
-              submissions.map((submission) => (
+              filteredSubmissions.map((submission) => (
                 <tr key={submission.id}>
                   <TableCell>
                     <div>
@@ -457,7 +557,8 @@ const HomePage: React.FC = () => {
               ))
             )}
           </tbody>
-        </Table>
+          </Table>
+        </TableContainer>
       </RecentSubmissions>
     </DashboardContainer>
   );

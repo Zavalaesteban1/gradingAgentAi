@@ -71,6 +71,7 @@ class StudentSubmission(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='submissions', null=True, blank=True)
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='submissions')
+    batch_job = models.ForeignKey('grading.BatchGradingJob', on_delete=models.CASCADE, null=True, blank=True, related_name='submissions')
     
     # Keep legacy fields for backward compatibility during migration  
     legacy_student_name = models.CharField(max_length=100, blank=True, null=True)
